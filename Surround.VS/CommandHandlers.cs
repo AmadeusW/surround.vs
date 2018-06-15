@@ -9,7 +9,7 @@ namespace Surround.VS
     class CommandHandlers // implement ICommandHandlers for TypedChar
     {
         // Check if there is a selection
-        // Check if selection is on the word boundary
-        // If there is, add a matching character
+        // Optionally, Check if selection is on the word boundary
+        // If there is, use brace completion to insert matching character
     }
 }
