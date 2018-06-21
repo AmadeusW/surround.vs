@@ -17,6 +17,9 @@ namespace Surround.VS
     [Name("Surround selection command handler")]
     class CommandHandlers : ICommandHandler<TypeCharCommandArgs>
     {
+        const bool useTwoUndos = false; // based on PR feedback
+
+        // Brace completion stuff is useless:
         //[Import]
         //IBraceCompletionSessionProvider braceCompletionProvider;
         
@@ -67,31 +70,42 @@ namespace Surround.VS
 
             var characterPair = TypedCharToStarAndEndChar[args.TypedChar];
 
-            // Allow user to undo the matching character.
-            // To do this, insert character at caret location first, then insert matching character
             ITextEdit edit;
-            if (selection.Start == args.TextView.Caret.Position.VirtualBufferPosition)
+            if (useTwoUndos)
             {
-                // First edit: opening character at caret location
-                edit = args.TextView.TextBuffer.CreateEdit();
-                edit.Insert(selection.Start.Position, characterPair.opening);
-                edit.Apply();
+                // Allow user to undo the matching character.
+                // To do this, insert character at caret location first, then insert matching character
+                if (selection.Start == args.TextView.Caret.Position.VirtualBufferPosition)
+                {
+                    // First edit: opening character at caret location
+                    edit = args.TextView.TextBuffer.CreateEdit();
+                    edit.Insert(selection.Start.Position, characterPair.opening);
+                    edit.Apply();
 
-                // Second edit: closing character
-                edit = args.TextView.TextBuffer.CreateEdit();
-                edit.Insert(selection.End.Position, characterPair.closing);
-                edit.Apply();
+                    // Second edit: closing character
+                    edit = args.TextView.TextBuffer.CreateEdit();
+                    edit.Insert(selection.End.Position, characterPair.closing);
+                    edit.Apply();
+                }
+                else
+                {
+                    // First edit: closing character at caret location
+                    edit = args.TextView.TextBuffer.CreateEdit();
+                    edit.Insert(selection.End.Position, characterPair.closing);
+                    edit.Apply();
+
+                    // Second edit: opening character
+                    edit = args.TextView.TextBuffer.CreateEdit();
+                    edit.Insert(selection.Start.Position, characterPair.opening);
+                    edit.Apply();
+                }
             }
             else
             {
-                // First edit: closing character at caret location
-                edit = args.TextView.TextBuffer.CreateEdit();
-                edit.Insert(selection.End.Position, characterPair.closing);
-                edit.Apply();
-
-                // Second edit: opening character
+                // Single undo operation
                 edit = args.TextView.TextBuffer.CreateEdit();
                 edit.Insert(selection.Start.Position, characterPair.opening);
+                edit.Insert(selection.End.Position, characterPair.closing);
                 edit.Apply();
             }
 
