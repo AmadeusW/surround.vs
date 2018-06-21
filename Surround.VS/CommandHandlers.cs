@@ -61,17 +61,41 @@ namespace Surround.VS
             // Preserve the selection
             var growingSelectionStart = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.Start.Position.Position, PointTrackingMode.Negative);
             var growingSelectionEnd = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.End.Position.Position, PointTrackingMode.Positive);
-            var selectionReversedProperty = selection.IsReversed;
+            var selectionReversed = selection.IsReversed;
 
             var characterPair = TypedCharToStarAndEndChar[args.TypedChar];
-            var edit = args.TextView.TextBuffer.CreateEdit();
-            edit.Insert(selection.Start.Position, characterPair.opening);
-            edit.Insert(selection.End.Position, characterPair.closing);
-            edit.Apply();
+
+            // Allow user to undo the matching character.
+            // To do this, insert character at caret location first, then insert matching character
+            ITextEdit edit;
+            if (selection.Start == args.TextView.Caret.Position.VirtualBufferPosition)
+            {
+                // First edit: opening character at caret location
+                edit = args.TextView.TextBuffer.CreateEdit();
+                edit.Insert(selection.Start.Position, characterPair.opening);
+                edit.Apply();
+
+                // Second edit: closing character
+                edit = args.TextView.TextBuffer.CreateEdit();
+                edit.Insert(selection.End.Position, characterPair.closing);
+                edit.Apply();
+            }
+            else
+            {
+                // First edit: closing character at caret location
+                edit = args.TextView.TextBuffer.CreateEdit();
+                edit.Insert(selection.End.Position, characterPair.closing);
+                edit.Apply();
+
+                // Second edit: opening character
+                edit = args.TextView.TextBuffer.CreateEdit();
+                edit.Insert(selection.Start.Position, characterPair.opening);
+                edit.Apply();
+            }
 
             // Restore selection
             var newSnapshot = selection.Start.Position.Snapshot;
-            selection.Select(new SnapshotSpan(growingSelectionStart.GetPoint(newSnapshot), growingSelectionEnd.GetPoint(newSnapshot)), selectionReversedProperty);
+            selection.Select(new SnapshotSpan(growingSelectionStart.GetPoint(newSnapshot), growingSelectionEnd.GetPoint(newSnapshot)), selectionReversed);
             return true; // we don't want to type and replace the selection
         }
 
