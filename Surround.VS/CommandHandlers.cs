@@ -34,6 +34,8 @@ namespace Surround.VS
             { '<', '>'},
             { '{', '}'},
             { '[', ']'},
+            { '_', '_'},
+            { '*', '*'},
         };
 
         Dictionary<char, (string opening, string closing)> TypedCharToStarAndEndChar = new Dictionary<char, (string, string)>();
