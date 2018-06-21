@@ -1,5 +1,5 @@
 # surround.vs
-VS editor extension that improves experience of surrounding selection with braces
+VS editor extension that brings single keystroke experience for surrounding selection with braces and other delimeters
 
 ## example
 Here, I type a quote `"` three times to surround three elements, and then a brace - either `[` or `]` to surround the last element.
