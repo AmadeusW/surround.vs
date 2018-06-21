@@ -96,6 +96,9 @@ namespace Surround.VS
             // Restore selection
             var newSnapshot = selection.Start.Position.Snapshot;
             selection.Select(new SnapshotSpan(growingSelectionStart.GetPoint(newSnapshot), growingSelectionEnd.GetPoint(newSnapshot)), selectionReversed);
+
+            // Move the caret so that this operation can be repeated
+            args.TextView.Caret.MoveTo(selectionReversed ? growingSelectionStart.GetPoint(newSnapshot) : growingSelectionEnd.GetPoint(newSnapshot));
             return true; // we don't want to type and replace the selection
         }
 
