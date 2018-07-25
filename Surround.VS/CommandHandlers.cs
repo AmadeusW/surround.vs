@@ -19,10 +19,11 @@ namespace Surround.VS
     {
         const bool useTwoUndos = false; // based on PR feedback
 
-        // Brace completion stuff is useless:
-        //[Import]
-        //IBraceCompletionSessionProvider braceCompletionProvider;
-        
+        [ImportMany]
+        private IEnumerable<Lazy<IBraceCompletionDefaultProvider, IBraceCompletionMetadata>> BraceCompletionProviders;
+
+        Dictionary<string, Dictionary<char, char>> ContentTypeToBracePairs = new Dictionary<string, Dictionary<char, char>>();
+
         // Check if there is a selection
         // Optionally, Check if selection is on the word boundary
         // If there is, use brace completion to insert matching character
@@ -49,6 +50,15 @@ namespace Surround.VS
             {
                 TypedCharToStarAndEndChar[pair.Key] = (pair.Key.ToString(), pair.Value.ToString());
                 TypedCharToStarAndEndChar[pair.Value] = (pair.Key.ToString(), pair.Value.ToString());
+            }
+            foreach (var braceCompletionProvider in BraceCompletionProviders)
+            {
+                foreach (var contentType in braceCompletionProvider.Metadata.ContentTypes)
+                {
+                    var zippy = new Dictionary<char, char>();
+                    braceCompletionProvider.Metadata.OpeningBraces.Zip(braceCompletionProvider.Metadata.ClosingBraces, (a, b) => zippy[a] = b);
+                    ContentTypeToBracePairs[contentType] = zippy;
+                }
             }
         }
 
