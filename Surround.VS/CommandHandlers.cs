@@ -22,6 +22,8 @@ namespace Surround.VS
         // Brace completion stuff is useless:
         //[Import]
         //IBraceCompletionSessionProvider braceCompletionProvider;
+        [Import]
+        IMultiSelectionBroker MultiSelectionBroker;
         
         // Check if there is a selection
         // Optionally, Check if selection is on the word boundary
@@ -54,68 +56,46 @@ namespace Surround.VS
 
         public bool ExecuteCommand(TypeCharCommandArgs args, CommandExecutionContext executionContext)
         {
-            var selection = args.TextView.Selection;
-            if (selection.IsEmpty)
-                return false;
-            if (selection.Start != args.TextView.Caret.Position.VirtualBufferPosition
-                && selection.End != args.TextView.Caret.Position.VirtualBufferPosition)
+            var primarySelection = args.TextView.Selection;
+            if (primarySelection.IsEmpty)
                 return false;
             if (!TypedCharToStarAndEndChar.ContainsKey(args.TypedChar))
                 return false;
 
-            // Preserve the selection
-            var growingSelectionStart = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.Start.Position.Position, PointTrackingMode.Negative);
-            var growingSelectionEnd = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.End.Position.Position, PointTrackingMode.Positive);
-            var selectionReversed = selection.IsReversed;
-
             var characterPair = TypedCharToStarAndEndChar[args.TypedChar];
 
-            ITextEdit edit;
-            if (useTwoUndos)
+            var edit = args.TextView.TextBuffer.CreateEdit();
+            MultiSelectionBroker.PerformActionOnAllSelections((transformer) =>
             {
-                // Allow user to undo the matching character.
-                // To do this, insert character at caret location first, then insert matching character
-                if (selection.Start == args.TextView.Caret.Position.VirtualBufferPosition)
-                {
-                    // First edit: opening character at caret location
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.Start.Position, characterPair.opening);
-                    edit.Apply();
+                var selection = transformer.Selection;
 
-                    // Second edit: closing character
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.End.Position, characterPair.closing);
-                    edit.Apply();
+                // Perform the edit
+                edit.Insert(selection.Start.Position, characterPair.opening);
+                edit.Insert(selection.End.Position, characterPair.closing);
+
+                
+            });
+            edit.Apply();
+            var updatedSnapshot = MultiSelectionBroker.CurrentSnapshot;
+            MultiSelectionBroker.PerformActionOnAllSelections((transformer) =>
+            {
+                VirtualSnapshotPoint newAnchorPoint;
+                VirtualSnapshotPoint newActivePoint;
+                if (transformer.Selection.IsReversed)
+                {
+                    newActivePoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.Start.Position - 1);
+                    newAnchorPoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.End.Position + 1);
                 }
                 else
                 {
-                    // First edit: closing character at caret location
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.End.Position, characterPair.closing);
-                    edit.Apply();
-
-                    // Second edit: opening character
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.Start.Position, characterPair.opening);
-                    edit.Apply();
+                    // anchor preceeds active point
+                    newAnchorPoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.Start.Position - 1);
+                    newActivePoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.End.Position + 1);
                 }
-            }
-            else
-            {
-                // Single undo operation
-                edit = args.TextView.TextBuffer.CreateEdit();
-                edit.Insert(selection.Start.Position, characterPair.opening);
-                edit.Insert(selection.End.Position, characterPair.closing);
-                edit.Apply();
-            }
-
-            // Restore selection
-            var newSnapshot = selection.Start.Position.Snapshot;
-            selection.Select(new SnapshotSpan(growingSelectionStart.GetPoint(newSnapshot), growingSelectionEnd.GetPoint(newSnapshot)), selectionReversed);
-
-            // Move the caret so that this operation can be repeated
-            args.TextView.Caret.MoveTo(selectionReversed ? growingSelectionStart.GetPoint(newSnapshot) : growingSelectionEnd.GetPoint(newSnapshot));
-            return true; // we don't want to type and replace the selection
+                transformer.MoveTo(newAnchorPoint, newActivePoint, transformer.Selection.InsertionPoint, PositionAffinity.Predecessor);
+            });
+            
+            return true; // Mark the command as handled, so that we don't overwrite the selection
         }
 
         public CommandState GetCommandState(TypeCharCommandArgs args) => CommandState.Unspecified;
