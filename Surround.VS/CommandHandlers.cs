@@ -36,9 +36,13 @@ namespace Surround.VS
                     {
                         foreach (var contentType in braceCompletionProvider.Metadata.ContentTypes)
                         {
-                            var zippy = new Dictionary<char, char>();
-                            braceCompletionProvider.Metadata.OpeningBraces.Zip(braceCompletionProvider.Metadata.ClosingBraces, (a, b) => { zippy.Add(a, b); return true; });
-                            _contentTypeToBracePairs[contentType] = zippy;
+                            var bracePairs = new Dictionary<char, char>();
+                            var pairs = braceCompletionProvider.Metadata.OpeningBraces.Zip(braceCompletionProvider.Metadata.ClosingBraces, (a, b) => (a, b));
+                            foreach (var pair in pairs)
+                            {
+                                bracePairs[pair.Item1] = pair.Item2;
+                            }
+                            _contentTypeToBracePairs[contentType] = bracePairs;
                         }
                     }
                 }
@@ -88,17 +92,21 @@ namespace Surround.VS
             // add specific args.SubjectBuffer.ContentType into ContentTypeToBracePairs
             if (!ContentTypeToBracePairs.ContainsKey(args.SubjectBuffer.ContentType.TypeName))
             {
-                var map = new Dictionary<char, char>();
                 var applicableContentTypes = AllContentTypeAndBracePairs.Keys.Where(ct => args.SubjectBuffer.ContentType.IsOfType(ct));
                 if (!applicableContentTypes.Any())
                 {
-                    ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = map;
+                    ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = new Dictionary<char, char>();
                     return false;
                 }
+
+                var map = new Dictionary<char, char>();
                 foreach (var applicableContentType in applicableContentTypes)
                 {
-                    var relevant = ContentTypeToBracePairs[applicableContentType];
-                    relevant.Select(n => { map.Add(n.Key, n.Value); return true; });
+                    var relevant = AllContentTypeAndBracePairs[applicableContentType];
+                    foreach (var pair in relevant)
+                    {
+                        map[pair.Key] = pair.Value;
+                    }
                 }
                 ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = map;
             }
