@@ -46,6 +46,7 @@
   <ItemGroup>
     <Compile Include="CommandHandlers.cs" />
     <Compile Include="IBraceCompletionMetadata.cs" />
+    <Compile Include="LanguageBraceData.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

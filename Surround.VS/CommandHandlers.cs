@@ -22,7 +22,29 @@ namespace Surround.VS
         [ImportMany]
         private IEnumerable<Lazy<IBraceCompletionDefaultProvider, IBraceCompletionMetadata>> BraceCompletionProviders;
 
+        Dictionary<string, Dictionary<char, char>> _contentTypeToBracePairs = null;
         Dictionary<string, Dictionary<char, char>> ContentTypeToBracePairs = new Dictionary<string, Dictionary<char, char>>();
+        Dictionary<string, Dictionary<char, char>> _allContentTypeAndBracePairs = null;
+        Dictionary<string, Dictionary<char, char>> AllContentTypeAndBracePairs
+        {
+            get
+            {
+                if (_contentTypeToBracePairs == null)
+                {
+                    _contentTypeToBracePairs = new Dictionary<string, Dictionary<char, char>>();
+                    foreach (var braceCompletionProvider in BraceCompletionProviders)
+                    {
+                        foreach (var contentType in braceCompletionProvider.Metadata.ContentTypes)
+                        {
+                            var zippy = new Dictionary<char, char>();
+                            braceCompletionProvider.Metadata.OpeningBraces.Zip(braceCompletionProvider.Metadata.ClosingBraces, (a, b) => { zippy.Add(a, b); return true; });
+                            _contentTypeToBracePairs[contentType] = zippy;
+                        }
+                    }
+                }
+                return _contentTypeToBracePairs;
+            }
+        }
 
         // Check if there is a selection
         // Optionally, Check if selection is on the word boundary
@@ -51,15 +73,6 @@ namespace Surround.VS
                 TypedCharToStarAndEndChar[pair.Key] = (pair.Key.ToString(), pair.Value.ToString());
                 TypedCharToStarAndEndChar[pair.Value] = (pair.Key.ToString(), pair.Value.ToString());
             }
-            foreach (var braceCompletionProvider in BraceCompletionProviders)
-            {
-                foreach (var contentType in braceCompletionProvider.Metadata.ContentTypes)
-                {
-                    var zippy = new Dictionary<char, char>();
-                    braceCompletionProvider.Metadata.OpeningBraces.Zip(braceCompletionProvider.Metadata.ClosingBraces, (a, b) => zippy[a] = b);
-                    ContentTypeToBracePairs[contentType] = zippy;
-                }
-            }
         }
 
         public bool ExecuteCommand(TypeCharCommandArgs args, CommandExecutionContext executionContext)
@@ -72,6 +85,29 @@ namespace Surround.VS
                 return false;
             if (!TypedCharToStarAndEndChar.ContainsKey(args.TypedChar))
                 return false;
+            // add specific args.SubjectBuffer.ContentType into ContentTypeToBracePairs
+            if (!ContentTypeToBracePairs.ContainsKey(args.SubjectBuffer.ContentType.TypeName))
+            {
+                var map = new Dictionary<char, char>();
+                var applicableContentTypes = AllContentTypeAndBracePairs.Keys.Where(ct => args.SubjectBuffer.ContentType.IsOfType(ct));
+                if (!applicableContentTypes.Any())
+                {
+                    ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = map;
+                    return false;
+                }
+                foreach (var applicableContentType in applicableContentTypes)
+                {
+                    var relevant = ContentTypeToBracePairs[applicableContentType];
+                    relevant.Select(n => { map.Add(n.Key, n.Value); return true; });
+                }
+                ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = map;
+            }
+            var bracePairs = ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName];
+            if (bracePairs.ContainsKey(args.TypedChar))
+            {
+                var match = bracePairs[args.TypedChar];
+            }
+
 
             // Preserve the selection
             var growingSelectionStart = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.Start.Position.Position, PointTrackingMode.Negative);
