@@ -20,7 +20,7 @@ namespace Surround.VS
     { }
 
     [Export(typeof(IBraceCompletionDefaultProvider))]
-    [ContentType("Markdown")]
+    [ContentType("code++.Markdown")]
     [BracePair('\'', '\'')]
     [BracePair('"', '"')]
     [BracePair('*', '*')]
