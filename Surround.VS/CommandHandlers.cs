@@ -17,21 +17,21 @@ namespace Surround.VS
     [Name("Surround selection command handler")]
     class CommandHandlers : ICommandHandler<TypeCharCommandArgs>
     {
-        const bool useTwoUndos = false; // based on PR feedback
+        public string DisplayName => "Surround selection command handler";
+        const bool useTwoUndos = false; // Prototype based on PR feedback
 
         [ImportMany]
         private IEnumerable<Lazy<IBraceCompletionDefaultProvider, IBraceCompletionMetadata>> BraceCompletionProviders;
 
-        Dictionary<string, Dictionary<char, char>> _contentTypeToBracePairs = null;
         Dictionary<string, Dictionary<char, char>> ContentTypeToBracePairs = new Dictionary<string, Dictionary<char, char>>();
         Dictionary<string, Dictionary<char, char>> _allContentTypeAndBracePairs = null;
         Dictionary<string, Dictionary<char, char>> AllContentTypeAndBracePairs
         {
             get
             {
-                if (_contentTypeToBracePairs == null)
+                if (_allContentTypeAndBracePairs == null)
                 {
-                    _contentTypeToBracePairs = new Dictionary<string, Dictionary<char, char>>();
+                    _allContentTypeAndBracePairs = new Dictionary<string, Dictionary<char, char>>();
                     foreach (var braceCompletionProvider in BraceCompletionProviders)
                     {
                         foreach (var contentType in braceCompletionProvider.Metadata.ContentTypes)
@@ -42,87 +42,46 @@ namespace Surround.VS
                             {
                                 bracePairs[pair.Item1] = pair.Item2;
                             }
-                            _contentTypeToBracePairs[contentType] = bracePairs;
+                            _allContentTypeAndBracePairs[contentType] = bracePairs;
                         }
                     }
                 }
-                return _contentTypeToBracePairs;
+                return _allContentTypeAndBracePairs;
             }
         }
 
-        // Check if there is a selection
-        // Optionally, Check if selection is on the word boundary
-        // If there is, use brace completion to insert matching character
-        public string DisplayName => throw new NotImplementedException();
-
-        Dictionary<char, char> BracePairs = new Dictionary<char, char>()
-        {
-            { '\'', '\''},
-            { '"', '"'},
-            { '`', '`'},
-            { '(', ')'},
-            { '<', '>'},
-            { '{', '}'},
-            { '[', ']'},
-            { '_', '_'},
-            { '*', '*'},
-        };
-
-        Dictionary<char, (string opening, string closing)> TypedCharToStarAndEndChar = new Dictionary<char, (string, string)>();
-
-        public CommandHandlers()
-        {
-            foreach (var pair in BracePairs)
-            {
-                TypedCharToStarAndEndChar[pair.Key] = (pair.Key.ToString(), pair.Value.ToString());
-                TypedCharToStarAndEndChar[pair.Value] = (pair.Key.ToString(), pair.Value.ToString());
-            }
-        }
+        public CommandState GetCommandState(TypeCharCommandArgs args) => CommandState.Unspecified;
 
         public bool ExecuteCommand(TypeCharCommandArgs args, CommandExecutionContext executionContext)
         {
+            var contentType = args.TextView.TextBuffer.ContentType;
             var selection = args.TextView.Selection;
             if (selection.IsEmpty)
                 return false;
+            // Act only if caret is in the middle of selection
             if (selection.Start != args.TextView.Caret.Position.VirtualBufferPosition
                 && selection.End != args.TextView.Caret.Position.VirtualBufferPosition)
                 return false;
-            if (!TypedCharToStarAndEndChar.ContainsKey(args.TypedChar))
+
+            var bracePairs = GetBracePairs(args.SubjectBuffer.ContentType);
+            char opening = default(char);
+            char closing = default(char);
+            if (bracePairs?.ContainsKey(args.TypedChar) == true)
+            {
+                // We act only when user typed opening brace
+                // For implmementation that works with either brace, see tag v0.2
+                opening = args.TypedChar;
+                closing = bracePairs[args.TypedChar];
+            }
+            else
+            {
                 return false;
-            // add specific args.SubjectBuffer.ContentType into ContentTypeToBracePairs
-            if (!ContentTypeToBracePairs.ContainsKey(args.SubjectBuffer.ContentType.TypeName))
-            {
-                var applicableContentTypes = AllContentTypeAndBracePairs.Keys.Where(ct => args.SubjectBuffer.ContentType.IsOfType(ct));
-                if (!applicableContentTypes.Any())
-                {
-                    ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = new Dictionary<char, char>();
-                    return false;
-                }
-
-                var map = new Dictionary<char, char>();
-                foreach (var applicableContentType in applicableContentTypes)
-                {
-                    var relevant = AllContentTypeAndBracePairs[applicableContentType];
-                    foreach (var pair in relevant)
-                    {
-                        map[pair.Key] = pair.Value;
-                    }
-                }
-                ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName] = map;
             }
-            var bracePairs = ContentTypeToBracePairs[args.SubjectBuffer.ContentType.TypeName];
-            if (bracePairs.ContainsKey(args.TypedChar))
-            {
-                var match = bracePairs[args.TypedChar];
-            }
-
 
             // Preserve the selection
             var growingSelectionStart = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.Start.Position.Position, PointTrackingMode.Negative);
             var growingSelectionEnd = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.End.Position.Position, PointTrackingMode.Positive);
             var selectionReversed = selection.IsReversed;
-
-            var characterPair = TypedCharToStarAndEndChar[args.TypedChar];
 
             ITextEdit edit;
             if (useTwoUndos)
@@ -133,24 +92,24 @@ namespace Surround.VS
                 {
                     // First edit: opening character at caret location
                     edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.Start.Position, characterPair.opening);
+                    edit.Insert(selection.Start.Position, opening.ToString());
                     edit.Apply();
 
                     // Second edit: closing character
                     edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.End.Position, characterPair.closing);
+                    edit.Insert(selection.End.Position, closing.ToString());
                     edit.Apply();
                 }
                 else
                 {
                     // First edit: closing character at caret location
                     edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.End.Position, characterPair.closing);
+                    edit.Insert(selection.End.Position, closing.ToString());
                     edit.Apply();
 
                     // Second edit: opening character
                     edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.Start.Position, characterPair.opening);
+                    edit.Insert(selection.Start.Position, opening.ToString());
                     edit.Apply();
                 }
             }
@@ -158,8 +117,8 @@ namespace Surround.VS
             {
                 // Single undo operation
                 edit = args.TextView.TextBuffer.CreateEdit();
-                edit.Insert(selection.Start.Position, characterPair.opening);
-                edit.Insert(selection.End.Position, characterPair.closing);
+                edit.Insert(selection.Start.Position, opening.ToString());
+                edit.Insert(selection.End.Position, closing.ToString());
                 edit.Apply();
             }
 
@@ -172,6 +131,29 @@ namespace Surround.VS
             return true; // we don't want to type and replace the selection
         }
 
-        public CommandState GetCommandState(TypeCharCommandArgs args) => CommandState.Unspecified;
+        private Dictionary<char, char> GetBracePairs(IContentType contentType)
+        {
+            if (!ContentTypeToBracePairs.ContainsKey(contentType.TypeName))
+            {
+                var applicableContentTypes = AllContentTypeAndBracePairs.Keys.Where(ct => contentType.IsOfType(ct));
+                if (!applicableContentTypes.Any())
+                {
+                    ContentTypeToBracePairs[contentType.TypeName] = null;
+                    return null;
+                }
+
+                var map = new Dictionary<char, char>();
+                foreach (var applicableContentType in applicableContentTypes)
+                {
+                    var relevant = AllContentTypeAndBracePairs[applicableContentType];
+                    foreach (var pair in relevant)
+                    {
+                        map[pair.Key] = pair.Value;
+                    }
+                }
+                ContentTypeToBracePairs[contentType.TypeName] = map;
+            }
+            return ContentTypeToBracePairs[contentType.TypeName];
+        }
     }
 }
