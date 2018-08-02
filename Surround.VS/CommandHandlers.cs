@@ -2,6 +2,7 @@
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.BraceCompletion;
 using Microsoft.VisualStudio.Text.Editor.Commanding.Commands;
+using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Utilities;
 using System;
 using System.Collections.Generic;
@@ -18,20 +19,19 @@ namespace Surround.VS
     class CommandHandlers : ICommandHandler<TypeCharCommandArgs>
     {
         public string DisplayName => "Surround selection command handler";
-        const bool useTwoUndos = false; // Prototype based on PR feedback
 
         [ImportMany]
         private IEnumerable<Lazy<IBraceCompletionDefaultProvider, IBraceCompletionMetadata>> BraceCompletionProviders;
 
         Dictionary<string, Dictionary<char, char>> ContentTypeToBracePairs = new Dictionary<string, Dictionary<char, char>>();
-        Dictionary<string, Dictionary<char, char>> _allContentTypeAndBracePairs = null;
-        Dictionary<string, Dictionary<char, char>> AllContentTypeAndBracePairs
+        Dictionary<string, Dictionary<char, char>> _rawContentTypeAndBracePairs = null;
+        Dictionary<string, Dictionary<char, char>> RawContentTypeAndBracePairs
         {
             get
             {
-                if (_allContentTypeAndBracePairs == null)
+                if (_rawContentTypeAndBracePairs == null)
                 {
-                    _allContentTypeAndBracePairs = new Dictionary<string, Dictionary<char, char>>();
+                    _rawContentTypeAndBracePairs = new Dictionary<string, Dictionary<char, char>>();
                     foreach (var braceCompletionProvider in BraceCompletionProviders)
                     {
                         foreach (var contentType in braceCompletionProvider.Metadata.ContentTypes)
@@ -42,11 +42,11 @@ namespace Surround.VS
                             {
                                 bracePairs[pair.Item1] = pair.Item2;
                             }
-                            _allContentTypeAndBracePairs[contentType] = bracePairs;
+                            _rawContentTypeAndBracePairs[contentType] = bracePairs;
                         }
                     }
                 }
-                return _allContentTypeAndBracePairs;
+                return _rawContentTypeAndBracePairs;
             }
         }
 
@@ -54,88 +54,67 @@ namespace Surround.VS
 
         public bool ExecuteCommand(TypeCharCommandArgs args, CommandExecutionContext executionContext)
         {
-            var contentType = args.TextView.TextBuffer.ContentType;
-            var selection = args.TextView.Selection;
-            if (selection.IsEmpty)
-                return false;
-            // Act only if caret is in the middle of selection
-            if (selection.Start != args.TextView.Caret.Position.VirtualBufferPosition
-                && selection.End != args.TextView.Caret.Position.VirtualBufferPosition)
+            var primarySelection = args.TextView.Selection;
+            if (primarySelection.IsEmpty)
                 return false;
 
+            var multiSelectionBroker = args.TextView.GetMultiSelectionBroker();
+            // If user typed opening brace, find matching closing brace. Otherwise, don't act.
             var bracePairs = GetBracePairs(args.SubjectBuffer.ContentType);
-            char opening = default(char);
-            char closing = default(char);
+            string opening = default(string);
+            string closing = default(string);
             if (bracePairs?.ContainsKey(args.TypedChar) == true)
             {
                 // We act only when user typed opening brace
                 // For implmementation that works with either brace, see tag v0.2
-                opening = args.TypedChar;
-                closing = bracePairs[args.TypedChar];
+                opening = args.TypedChar.ToString();
+                closing = bracePairs[args.TypedChar].ToString();
             }
             else
             {
                 return false;
             }
 
-            // Preserve the selection
-            var growingSelectionStart = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.Start.Position.Position, PointTrackingMode.Negative);
-            var growingSelectionEnd = selection.Start.Position.Snapshot.CreateTrackingPoint(selection.End.Position.Position, PointTrackingMode.Positive);
-            var selectionReversed = selection.IsReversed;
-
-            ITextEdit edit;
-            if (useTwoUndos)
+            // Add braces
+            var edit = args.TextView.TextBuffer.CreateEdit();
+            multiSelectionBroker.PerformActionOnAllSelections((transformer) =>
             {
-                // Allow user to undo the matching character.
-                // To do this, insert character at caret location first, then insert matching character
-                if (selection.Start == args.TextView.Caret.Position.VirtualBufferPosition)
-                {
-                    // First edit: opening character at caret location
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.Start.Position, opening.ToString());
-                    edit.Apply();
+                var selection = transformer.Selection;
+                edit.Insert(selection.Start.Position, opening);
+                edit.Insert(selection.End.Position, closing);
+            });
+            edit.Apply();
 
-                    // Second edit: closing character
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.End.Position, closing.ToString());
-                    edit.Apply();
+            // Expand the selection so that the operation can be repeated
+            var updatedSnapshot = multiSelectionBroker.CurrentSnapshot;
+            multiSelectionBroker.PerformActionOnAllSelections((transformer) =>
+            {
+                VirtualSnapshotPoint newAnchorPoint;
+                VirtualSnapshotPoint newActivePoint;
+                if (transformer.Selection.IsReversed)
+                {
+                    // Selection does not expand left when adding characters at its beginning. We need to explicitly expand it.
+                    newActivePoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.Start.Position - 1);
+                    newAnchorPoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.End.Position);
                 }
                 else
                 {
-                    // First edit: closing character at caret location
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.End.Position, closing.ToString());
-                    edit.Apply();
-
-                    // Second edit: opening character
-                    edit = args.TextView.TextBuffer.CreateEdit();
-                    edit.Insert(selection.Start.Position, opening.ToString());
-                    edit.Apply();
+                    // Selection does not expand left when adding characters at its beginning. We need to explicitly expand it.
+                    newAnchorPoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.Start.Position - 1);
+                    newActivePoint = new VirtualSnapshotPoint(updatedSnapshot, transformer.Selection.End.Position);
                 }
-            }
-            else
-            {
-                // Single undo operation
-                edit = args.TextView.TextBuffer.CreateEdit();
-                edit.Insert(selection.Start.Position, opening.ToString());
-                edit.Insert(selection.End.Position, closing.ToString());
-                edit.Apply();
-            }
+                transformer.MoveTo(newAnchorPoint, newActivePoint, transformer.Selection.InsertionPoint, PositionAffinity.Predecessor);
+            });
 
-            // Restore selection
-            var newSnapshot = selection.Start.Position.Snapshot;
-            selection.Select(new SnapshotSpan(growingSelectionStart.GetPoint(newSnapshot), growingSelectionEnd.GetPoint(newSnapshot)), selectionReversed);
-
-            // Move the caret so that this operation can be repeated
-            args.TextView.Caret.MoveTo(selectionReversed ? growingSelectionStart.GetPoint(newSnapshot) : growingSelectionEnd.GetPoint(newSnapshot));
-            return true; // we don't want to type and replace the selection
+            // Mark command as handled, so that the editor doesn't type and replace the selection
+            return true;
         }
 
         private Dictionary<char, char> GetBracePairs(IContentType contentType)
         {
             if (!ContentTypeToBracePairs.ContainsKey(contentType.TypeName))
             {
-                var applicableContentTypes = AllContentTypeAndBracePairs.Keys.Where(ct => contentType.IsOfType(ct));
+                var applicableContentTypes = RawContentTypeAndBracePairs.Keys.Where(ct => contentType.IsOfType(ct));
                 if (!applicableContentTypes.Any())
                 {
                     ContentTypeToBracePairs[contentType.TypeName] = null;
@@ -145,7 +124,7 @@ namespace Surround.VS
                 var map = new Dictionary<char, char>();
                 foreach (var applicableContentType in applicableContentTypes)
                 {
-                    var relevant = AllContentTypeAndBracePairs[applicableContentType];
+                    var relevant = RawContentTypeAndBracePairs[applicableContentType];
                     foreach (var pair in relevant)
                     {
                         map[pair.Key] = pair.Value;
