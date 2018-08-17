@@ -16,7 +16,18 @@ namespace Surround.VS
     [BracePair('(', ')')]
     [BracePair('[', ']')]
     [BracePair('{', '}')]
+    [BracePair('<', '>')]
     public class CSharpBraceData : IBraceCompletionDefaultProvider
+    { }
+
+    [Export(typeof(IBraceCompletionDefaultProvider))]
+    [ContentType("TypeScript")]
+    [BracePair('\'', '\'')]
+    [BracePair('"', '"')]
+    [BracePair('(', ')')]
+    [BracePair('[', ']')]
+    [BracePair('{', '}')]
+    public class TypeScriptBraceData : IBraceCompletionDefaultProvider
     { }
 
     [Export(typeof(IBraceCompletionDefaultProvider))]
