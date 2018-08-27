@@ -37,6 +37,7 @@ namespace Surround.VS
     [BracePair('*', '*')]
     [BracePair('_', '_')]
     [BracePair('|', '|')]
+    [BracePair('`', '`')]
     public class MarkdownBraceData : IBraceCompletionDefaultProvider
     { }
 
